@@ -4,11 +4,14 @@
 #include <structmember.h>
 #include <logcount.h>
 
+staticforward PyTypeObject LogCountType;
+
 typedef struct {
   PyObject_HEAD
   struct logcount lc;
 } LogCount;
 
+/* Adds each of the arguments to the logcount. */
 static int
 add(LogCount *self, PyObject *args)
 {
@@ -118,12 +121,59 @@ LogCount_add(LogCount *self, PyObject *args)
   if (add(self, args) < 0)
     return 0;
 
+  Py_INCREF(Py_None);
   return Py_None;
+}
+
+PyObject *
+LogCount_combine(LogCount *self, PyObject *args)
+{
+  LogCount *other;
+  if (!PyArg_ParseTuple(args, "O!", &LogCountType, &other))
+    return 0;
+
+  if (self->lc.nhash != other->lc.nhash) {
+    PyErr_SetString(PyExc_ValueError, "only LogCount objects with the same number of hashes can be combined");
+    return 0;
+  }
+
+  logcount_combine(&self->lc, &other->lc);
+
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
+PyObject *
+LogCount_from_hashes(PyTypeObject *cls, PyObject *args)
+{
+  char *hashes;
+  int len;
+  if (!PyArg_ParseTuple(args, "s#", &hashes, &len))
+    return 0;
+
+  if (len % sizeof(int)) {
+    PyErr_SetString(PyExc_ValueError, "hash must be a string whose length is even mod 4");
+    return 0;
+  }
+
+  int nhash = len / sizeof(int);
+
+  LogCount *self = (LogCount *) cls->tp_alloc(cls, 0);
+  if (self) {
+    logcount_init(&self->lc, nhash);
+    memcpy(self->lc.hashes, hashes, len);
+  }
+
+  return (PyObject *) self;
 }
 
 static PyMethodDef LogCount_methods[] = {
   { "add", (PyCFunction) LogCount_add, METH_VARARGS,
     "Adds the arguments to the log count." },
+  { "combine", (PyCFunction) LogCount_combine, METH_VARARGS,
+    "Combines the argument logcount into this logcount." },
+  { "from_hashes", (PyCFunction) LogCount_from_hashes, METH_VARARGS | METH_CLASS,
+    "Creates a new LogCount object from a raw hash string." },
   { 0 }
 };
 
